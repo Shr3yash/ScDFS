@@ -1,0 +1,10 @@
+build/
+data/
+*.o
+*.a
+*.so
+*.dylib
+*.dSYM/
+.DS_Store
+compile_commands.json
+/tmp/
