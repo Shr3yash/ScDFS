@@ -20,12 +20,10 @@ public:
     ThreadPool(const ThreadPool&) = delete;
     ThreadPool& operator=(const ThreadPool&) = delete;
 
-    // Submit a task and get a future for the result.
     template <typename F, typename... Args>
     auto submit(F&& f, Args&&... args)
         -> std::future<std::invoke_result_t<F, Args...>>;
 
-    // Submit without caring about the result.
     void enqueue(std::function<void()> task);
 
     size_t thread_count() const { return workers_.size(); }

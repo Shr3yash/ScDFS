@@ -25,7 +25,7 @@ bool TcpClient::connect(const std::string& host, uint16_t port, int timeout_ms) 
         return false;
     }
 
-    // Non-blocking connect with timeout
+    // Non-blocking so poll() can give up after timeout_ms.
     int flags = fcntl(fd_, F_GETFL, 0);
     fcntl(fd_, F_SETFL, flags | O_NONBLOCK);
 
@@ -63,7 +63,7 @@ bool TcpClient::connect(const std::string& host, uint16_t port, int timeout_ms) 
         }
     }
 
-    // Restore blocking mode
+    // send/recv below assume a blocking socket.
     fcntl(fd_, F_SETFL, flags);
 
     LOG_DEBUG("Connected to ", host, ":", port);
@@ -83,26 +83,6 @@ bool TcpClient::send_receive(const WireMessage& request, WireMessage& response) 
     if (fd_ < 0) return false;
     if (!send_message(fd_, request)) return false;
     return recv_message(fd_, response);
-}
-
-bool TcpClient::send_raw(const uint8_t* data, size_t len) {
-    size_t sent = 0;
-    while (sent < len) {
-        ssize_t n = ::send(fd_, data + sent, len - sent, MSG_NOSIGNAL);
-        if (n <= 0) return false;
-        sent += n;
-    }
-    return true;
-}
-
-bool TcpClient::recv_raw(uint8_t* data, size_t len) {
-    size_t received = 0;
-    while (received < len) {
-        ssize_t n = ::recv(fd_, data + received, len - received, 0);
-        if (n <= 0) return false;
-        received += n;
-    }
-    return true;
 }
 
 bool TcpClient::send_message(int fd, const WireMessage& msg) {

@@ -15,17 +15,16 @@ void signal_handler(int) {
 }
 
 void print_usage() {
-    std::cout << "ScDFS Coordinator — Interactive Shell\n"
-              << "Commands:\n"
-              << "  register <node_id> <address> <port>  — Register a storage node\n"
-              << "  put <local_path> <remote_path>       — Upload a file\n"
-              << "  get <remote_path> <local_path>       — Download a file\n"
-              << "  rm <remote_path>                     — Delete a file\n"
-              << "  ls [prefix]                          — List files\n"
-              << "  info <remote_path>                   — File info\n"
-              << "  recover <node_id>                    — Trigger recovery\n"
-              << "  status                               — Cluster status\n"
-              << "  quit                                 — Exit\n";
+    std::cout << "scdfs coordinator\n"
+              << "  register <node_id> <address> <port>\n"
+              << "  put <local_path> <remote_path>\n"
+              << "  get <remote_path> <local_path>\n"
+              << "  rm <remote_path>\n"
+              << "  ls [prefix]\n"
+              << "  info <remote_path>\n"
+              << "  recover <node_id>\n"
+              << "  status\n"
+              << "  quit\n";
 }
 
 int main(int argc, char** argv) {

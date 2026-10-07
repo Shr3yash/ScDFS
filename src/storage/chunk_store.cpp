@@ -13,7 +13,7 @@ namespace scdfs {
 ChunkStore::ChunkStore(const std::string& data_dir) : data_dir_(data_dir) {
     ensure_directory();
 
-    // Scan existing chunks on startup
+    // Count bytes already on disk so the total is not zero after a restart.
     if (fs::exists(data_dir_)) {
         for (const auto& entry : fs::directory_iterator(data_dir_)) {
             if (entry.path().extension() == ".chunk") {
@@ -119,7 +119,7 @@ size_t ChunkStore::chunk_count() const {
 }
 
 Checksum ChunkStore::compute_checksum(const uint8_t* data, size_t size) const {
-    // Simple FNV-1a 64-bit hash as checksum
+    // FNV-1a 64. Stored on the chunk row; reads never compare it.
     uint64_t hash = 14695981039346656037ULL;
     for (size_t i = 0; i < size; i++) {
         hash ^= data[i];

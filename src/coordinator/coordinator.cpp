@@ -8,8 +8,6 @@
 #include <chrono>
 #include <future>
 #include <algorithm>
-#include <sstream>
-#include <iomanip>
 
 namespace scdfs {
 
@@ -77,18 +75,15 @@ UploadResult Coordinator::upload_file(const FilePath& path, const uint8_t* data,
     result.file_path = path;
     result.file_size = size;
 
-    // Split file into chunks
     auto chunks = split_file(path, data, size);
     result.chunk_count = static_cast<int>(chunks.size());
 
     LOG_INFO("Uploading ", path, " (", size, " bytes, ", chunks.size(), " chunks)");
 
-    // Get current version
     auto existing = metadata_->get_file(path);
     Version version = existing ? existing->version + 1 : 1;
     result.version = version;
 
-    // Write chunk metadata as PENDING
     for (const auto& chunk : chunks) {
         auto target_nodes = replication_->get_replica_nodes(chunk.id);
 
@@ -105,7 +100,6 @@ UploadResult Coordinator::upload_file(const FilePath& path, const uint8_t* data,
         metadata_->put_chunk(meta);
     }
 
-    // Replicate chunks in parallel using thread pool
     std::vector<std::future<std::vector<NodeId>>> futures;
     futures.reserve(chunks.size());
 
@@ -115,7 +109,8 @@ UploadResult Coordinator::upload_file(const FilePath& path, const uint8_t* data,
         }));
     }
 
-    // Wait for all replications and check quorum
+    // Pipeline success hands back every target, so this only fails
+    // when the direct-write fallback missed write_quorum.
     bool all_committed = true;
     for (size_t i = 0; i < futures.size(); i++) {
         auto acked_nodes = futures[i].get();
@@ -171,7 +166,6 @@ DownloadResult Coordinator::download_file(const FilePath& path) {
 
     LOG_INFO("Downloading ", path, " (", chunks.size(), " chunks, parallel)");
 
-    // Fetch all chunks in parallel — this is where the 40% improvement comes from
     std::vector<std::future<std::pair<int, std::vector<uint8_t>>>> futures;
     futures.reserve(chunks.size());
 
@@ -187,7 +181,6 @@ DownloadResult Coordinator::download_file(const FilePath& path) {
         }));
     }
 
-    // Collect results and reassemble in order
     std::vector<std::pair<int, std::vector<uint8_t>>> chunk_results;
     chunk_results.reserve(futures.size());
 
@@ -198,7 +191,6 @@ DownloadResult Coordinator::download_file(const FilePath& path) {
     std::sort(chunk_results.begin(), chunk_results.end(),
               [](const auto& a, const auto& b) { return a.first < b.first; });
 
-    // Reassemble file
     result.data.reserve(file_meta->file_size);
     for (const auto& [idx, data] : chunk_results) {
         if (data.empty()) {
@@ -285,6 +277,7 @@ std::vector<Coordinator::ChunkData> Coordinator::split_file(const FilePath& path
     int index = 0;
     size_t offset = 0;
 
+    // FNV only. ChunkStore also creates this directory and scans it for *.chunk.
     ChunkStore checksum_helper("/tmp");
 
     while (offset < size) {

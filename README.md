@@ -1,166 +1,76 @@
-# ScDFS — Scalable Distributed File System
+# ScDFS
 
-A chunk-based distributed file system built in C++ featuring consistent hashing, Cassandra-backed metadata, 3x replication, and multithreaded operations.
+Chunked file store in C++. The coordinator splits a file, places the chunks with a consistent hash ring, and keeps a few copies on storage nodes that speak TCP. Metadata is an in-memory map unless you build the Cassandra backend.
 
-## Architecture
+`ScDFSClient` calls the coordinator in the same process. The storage nodes are the processes that listen.
 
-```
-┌──────────┐     ┌──────────────┐     ┌────────────────────┐
-│  Client  │────▶│  Coordinator │────▶│  Cassandra / Memory │
-│          │     │              │     │  (Metadata Store)   │
-└──────────┘     └──────┬───────┘     └────────────────────┘
-                        │
-              ┌─────────┼─────────┐
-              ▼         ▼         ▼
-         ┌─────────┐ ┌─────────┐ ┌─────────┐
-         │ Storage  │ │ Storage  │ │ Storage  │
-         │ Node 0   │ │ Node 1   │ │ Node 2   │  ... N nodes
-         └─────────┘ └─────────┘ └─────────┘
-```
+## Where chunks go
 
-**Four components:**
-- **Coordinator** — chunk placement, version management, quorum enforcement
-- **Storage Nodes** — store chunk bytes on disk, serve over TCP, pipeline replication
-- **Metadata Store** — Cassandra (production) or in-memory (development) — stores file-to-chunk maps, replica locations, version state
-- **Recovery Worker** — heartbeat monitoring, failure detection, merge protocol, re-replication
+Each node is inserted as 128 virtual nodes (`Config::virtual_nodes`) on a ring hashed with MurmurHash3 x64_128. `get_nodes` starts at the key and walks clockwise, skipping vnode hits for a physical node it already picked, until it has `replication_factor` distinct nodes. Default is 3. Adding a node moves the keys that land in its new arcs, not the whole keyspace.
 
-## Key Design Decisions
+`Murmur3::hash_to_token` is the first 64 bits, cast to `int64_t`. That is the same shape as Cassandra's Murmur3Partitioner. I have not diffed it against their Java implementation.
 
-### Consistent Hashing (Murmur3)
-Nodes are placed on a hash ring with 128 virtual nodes each. Adding a node moves ~1/N of keys instead of the O(N) reshuffling that modulo hashing causes. Uses the same MurmurHash3 x64_128 algorithm as Cassandra's Murmur3Partitioner.
+Chunk ids are the hex digest of `path:index`, so the same path and index always name the same chunk.
 
-### Write Path
-1. File splits into fixed-size chunks (default 64 MB)
-2. Each chunk ID is hashed onto the ring → primary is the next clockwise node → next R-1 distinct physical nodes are replicas
-3. Pipeline-style replication: client streams to primary, which forwards to the next replica
-4. Coordinator waits for W acknowledgments, then commits `COMMITTED` status to metadata
-5. Nothing visible to reads until the commit lands — monotonically increasing versions
+## Writes
 
-### Read Path
-1. Query metadata for chunk list and node locations
-2. Fetch all chunks **in parallel** using the thread pool — this is where the latency improvement comes from
-3. Without threading: N chunks × sequential round trips; with threading: all N fetch concurrently, total ≈ slowest single chunk
+`upload_file` slices the buffer at `chunk_size` (64 MB unless you change it) and inserts each chunk row as `PENDING` before any bytes go out.
 
-### Failure Recovery (Merge Protocol)
-When a node fails:
-1. Heartbeat monitor detects timeout → marks `FAILED` in metadata → removes from hash ring
-2. Recovery worker scans for chunks that listed the failed node as a replica
-3. **Merge protocol** handles the hard edge case — write-in-flight during failure:
-   - If metadata shows `PENDING` (uncommitted): discard partial replicas, surface previous version
-   - If metadata shows `COMMITTED`: re-replicate from survivors to new targets, restore replication factor
+`replicate_chunk` tries a pipeline. One `STORE_CHUNK` goes to the primary, with the other replicas listed as `host:port` strings. The primary writes its file, then forwards the rest with `REPLICATE_CHUNK`. Its ACK means the local write worked. A failed forward still produces that ACK, and the manager returns the entire target list.
 
-## Benchmark Results
+If the primary call fails, the manager writes each replica from the coordinator and returns the nodes that answered. The coordinator marks a chunk `COMMITTED` when that list is at least `write_quorum` (default 2). On the pipeline path the list is everyone, so the check passes even if a later hop dropped the chunk. `read_quorum` sits on `Config` and nothing reads it. A fetch walks the replica list and takes the first node that returns bytes.
 
-```
-ScDFS THROUGHPUT BENCHMARK
-  Chunk size:    1024 KB | Storage nodes: 5 | Thread pool: 8 | Replication: 3x
+The file row is written only after every chunk commits. Downloads skip anything that is not `COMMITTED`.
 
-[1] UPLOAD THROUGHPUT
-  32 MB x 5 files:  149.57 MB/s  avg_lat=213.95ms  p95=230.77ms
+Overwrite bumps `FileMetadata::version`. A `PENDING` chunk that recovery touches is deleted off the other replicas and marked `DELETED`. The writer has to send the file again. There is no rollback to the previous bytes.
 
-[2] DOWNLOAD: PARALLEL vs SEQUENTIAL
-  Parallel (thread pool):  1615.16 MB/s  avg_lat=19.43ms
-  Sequential:               975.74 MB/s  avg_lat=32.38ms
-  >> Parallel is 39.6% faster than sequential
+## Reads
 
-[3] CONCURRENT CLIENT UPLOADS (16 MB each)
-   1 client:   174.33 MB/s
-   3 clients:  198.35 MB/s
-   5 clients:  214.32 MB/s
-  10 clients:  254.18 MB/s
+`download_file` loads the chunk list, fetches `COMMITTED` chunks on the coordinator thread pool, sorts by index, and concatenates. `download_file_sequential` is the same loop on the calling thread. `make benchmark` times both on whatever machine you run it on.
 
-[5] FAILURE RECOVERY
-  Recovery time: 1510.79 ms | Chunks recovered: 627
-  Data accessible after recovery: YES | Integrity check: PASS
-```
+## When a node dies
 
-## Building
+`RecoveryWorker` sleeps `heartbeat_interval_ms` (2s) and compares `now` to `last_heartbeat`. Past `heartbeat_timeout_ms` (6s) the node is marked `FAILED`, removed from the ring, and `recover_node` runs.
 
-**Requirements:** C++17 compiler (g++ or clang++)
+`register_storage_node` is the only writer of `last_heartbeat`. Nothing sends `HEARTBEAT` and nothing calls `update_heartbeat`. Leave the process up past the timeout and every node looks dead. The `recover` shell command and the tests call `recover_node` directly.
+
+For each chunk that listed the failed node:
+
+- `PENDING`: delete it on the other replicas, set `DELETED`, stop.
+- `DELETED`: skip.
+- `COMMITTED`: drop the failed id. If the remaining count is under the replication factor, copy from the first survivor onto active nodes that do not already have the chunk. Stop if there is no such node.
+
+`resolve_chunk` does that for a single chunk. Nothing calls it.
+
+## Build and run
+
+C++17, pthreads.
 
 ```bash
-# Build everything (library, executables, tests, benchmark)
-make all
-
-# Run tests
+make
 make test
-
-# Run benchmark
 make benchmark
-
-# Clean
-make clean
 ```
 
-### With Cassandra support (optional)
-
-```bash
-# Start Cassandra via Docker
-./scripts/setup_cassandra.sh
-
-# Build with Cassandra driver
-# (Requires DataStax C++ driver: https://github.com/datastax/cpp-driver)
-cmake -DSCDFS_USE_CASSANDRA=ON ..
-```
-
-## Usage
-
-### Interactive Shell
-
-```bash
-# Start coordinator
-./build/scdfs_coordinator
-
-# Available commands:
-scdfs> register node_0 127.0.0.1 9200
-scdfs> register node_1 127.0.0.1 9201
-scdfs> register node_2 127.0.0.1 9202
-scdfs> put /path/to/local/file.dat /remote/file.dat
-scdfs> get /remote/file.dat /path/to/output.dat
-scdfs> ls
-scdfs> info /remote/file.dat
-scdfs> recover node_0
-scdfs> status
-```
-
-### Start a Cluster
-
-```bash
-# Start 5 storage nodes + coordinator
-./scripts/start_cluster.sh 5
-```
-
-### Storage Node
+`scripts/start_cluster.sh 5` uses CMake when `build/scdfs_storage` is missing, starts that many storage nodes at port 9200 and up, and pipes `register` lines into the coordinator.
 
 ```bash
 ./build/scdfs_storage node_0 127.0.0.1 9200 ./data
+./build/scdfs_coordinator
 ```
 
-## Project Structure
+Coordinator flags: `--cassandra <host>`, `--chunk-size`, `--threads`, `--replication`, `--data-dir`, `--debug`.
 
-```
-ScDFS/
-├── include/
-│   ├── common/         # Types, config, logger, serialization
-│   ├── hashing/        # Murmur3, consistent hash ring
-│   ├── threading/      # Thread pool
-│   ├── network/        # TCP server/client
-│   ├── storage/        # Chunk store, storage node
-│   ├── metadata/       # MetadataStore interface, Memory + Cassandra backends
-│   ├── replication/    # Replication manager, recovery worker
-│   ├── coordinator/    # Coordinator (orchestrator)
-│   └── client/         # ScDFS client API
-├── src/                # Implementations
-├── tests/              # Unit + integration tests
-├── benchmarks/         # Throughput benchmark
-├── scripts/            # Cluster setup, Cassandra setup, benchmark runner
-├── Makefile
-└── CMakeLists.txt
-```
+Shell commands: `register`, `put`, `get`, `rm`, `ls`, `info`, `recover`, `status`, `quit`. `put` and `get` take local paths.
 
-## Tradeoffs
+`scripts/setup_cassandra.sh` starts `cassandra:4.1` in Docker and creates keyspace `scdfs`. The driver build is `-DSCDFS_USE_CASSANDRA=ON` and needs the DataStax C++ driver (`pkg-config` name `cassandra`). If that binary is started with `--cassandra` but the driver was not compiled in, `initialize()` fails and the coordinator logs and uses `MemoryMetadataStore`.
 
-- **Consistency costs write throughput.** Waiting for W acks before committing adds latency. Deliberate tradeoff against serving stale data.
-- **Cassandra is a critical path.** If the metadata cluster degrades, reads and writes degrade with it.
-- **Fixed chunk size is a simplification.** Small files waste space. Variable-sized chunks or a fast path for small files is the production answer.
-- **Consistent hashing reduces but doesn't eliminate rebalancing.** Virtual nodes distribute load more evenly but the ring still needs updating on membership changes.
+## Rough edges
+
+Chunks are a fixed size. A 5-byte file is still one chunk file. The checksum stored with the chunk is FNV-1a. Reads ignore it.
+
+The memory store is three maps, each with a `shared_mutex`. The Cassandra store is the same rows in CQL. Finding every chunk on a node scans the `chunks` table; there is no secondary index.
+
+Wire integers are host endian (`memcpy` of `uint32_t`). The tests all run on one machine.
+
+`include/` and `src/` are split into `hashing`, `threading`, `network`, `storage`, `metadata`, `replication`, `coordinator`, and `client`. Tests are in `tests/`. The benchmark is `benchmarks/throughput_benchmark.cpp`.

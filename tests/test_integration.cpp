@@ -156,12 +156,10 @@ void test_parallel_vs_sequential() {
     auto data = random_data(8 * 1024 * 1024); // 8 MB = 32 chunks
     cluster.client().put_data("/test/parallel_test.bin", data.data(), data.size());
 
-    // Parallel download
     auto par = cluster.client().get_data("/test/parallel_test.bin");
     assert(par.success);
     assert(par.data == data);
 
-    // Sequential download
     auto seq = cluster.client().get_data_sequential("/test/parallel_test.bin");
     assert(seq.success);
     assert(seq.data == data);
@@ -203,16 +201,14 @@ void test_node_failure_recovery() {
     auto data = random_data(3 * 1024 * 1024);
     cluster.client().put_data("/recovery/test.bin", data.data(), data.size());
 
-    // Stop one node to simulate failure
     cluster.nodes()[0]->stop();
     cluster.coordinator().trigger_recovery("node_0");
 
-    // Data should still be accessible from surviving replicas
     auto result = cluster.client().get_data("/recovery/test.bin");
     assert(result.success);
     assert(result.data == data);
 
-    std::cout << "  [PASS] Node failure recovery — data still accessible\n";
+    std::cout << "  [PASS] Node failure recovery, data still readable\n";
 }
 
 void test_metadata_consistency() {

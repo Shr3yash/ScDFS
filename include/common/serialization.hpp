@@ -28,10 +28,6 @@ public:
         data_.insert(data_.end(), buf, buf + len);
     }
 
-    void write_raw(const uint8_t* buf, size_t len) {
-        data_.insert(data_.end(), buf, buf + len);
-    }
-
     uint8_t read_u8()   { uint8_t v;  read_bytes(&v, sizeof(v)); return v; }
     uint16_t read_u16() { uint16_t v; read_bytes(&v, sizeof(v)); return v; }
     uint32_t read_u32() { uint32_t v; read_bytes(&v, sizeof(v)); return v; }
@@ -49,10 +45,6 @@ public:
         std::vector<uint8_t> v(data_.begin() + pos_, data_.begin() + pos_ + len);
         pos_ += len;
         return v;
-    }
-
-    void read_raw(uint8_t* buf, size_t len) {
-        read_bytes(buf, len);
     }
 
     size_t remaining() const { return data_.size() - pos_; }

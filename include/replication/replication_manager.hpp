@@ -10,31 +10,28 @@
 
 namespace scdfs {
 
-// Manages chunk replication: determines replica placement on the hash ring
-// and orchestrates pipeline-style writes to storage nodes.
+// Replica sets come from the ring.
+// replicate_chunk tries the primary first. If that call fails it writes
+// each node from here and returns the ones that ACKed.
 class ReplicationManager {
 public:
     ReplicationManager(std::shared_ptr<ConsistentHashRing> ring,
                        std::shared_ptr<MetadataStore> metadata,
                        const Config& config);
 
-    // Determine which nodes should hold replicas for a chunk.
     std::vector<NodeId> get_replica_nodes(const ChunkId& chunk_id) const;
 
-    // Replicate a chunk to its designated nodes using pipeline-style writes.
-    // Returns the list of nodes that acknowledged the write.
+    // Pipeline success returns every target, not the hops that stored the bytes.
     std::vector<NodeId> replicate_chunk(const ChunkId& chunk_id,
                                          const uint8_t* data, size_t size);
 
-    // Re-replicate a chunk from a surviving replica to a new target.
     bool re_replicate_chunk(const ChunkId& chunk_id,
                             const NodeId& source_node,
                             const NodeId& target_node);
 
-    // Delete a chunk from a specific node.
     bool delete_from_node(const ChunkId& chunk_id, const NodeId& node_id);
 
-    // Fetch a chunk from one of the available replicas.
+    // First replica that answers. read_quorum is not applied.
     bool fetch_chunk(const ChunkId& chunk_id, const std::vector<NodeId>& replicas,
                      std::vector<uint8_t>& out);
 
@@ -48,7 +45,6 @@ private:
     bool fetch_from_node(const ChunkId& chunk_id, const NodeId& node_id,
                          std::vector<uint8_t>& out);
 
-    // Parse "address:port" from node_id or from metadata
     std::pair<std::string, uint16_t> resolve_node(const NodeId& node_id) const;
 };
 

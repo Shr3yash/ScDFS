@@ -34,7 +34,6 @@ bool ScDFSClient::get(const FilePath& remote_path, const std::string& local_path
     auto result = coordinator_->download_file(remote_path);
     if (!result.success) return false;
 
-    // Ensure parent directory exists
     auto parent = fs::path(local_path).parent_path();
     if (!parent.empty() && !fs::exists(parent)) {
         fs::create_directories(parent);
