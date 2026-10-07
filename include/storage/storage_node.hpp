@@ -11,8 +11,9 @@
 
 namespace scdfs {
 
-// A storage node that stores chunk data and serves requests over TCP.
-// Handles STORE_CHUNK, FETCH_CHUNK, DELETE_CHUNK, HEARTBEAT, REPLICATE_CHUNK.
+// One disk and one TCP port.
+// STORE_CHUNK writes locally, then forwards any remaining host:port replicas.
+// The ACK is the local write only.
 class StorageNode {
 public:
     StorageNode(const NodeId& node_id, const std::string& address, uint16_t port,
@@ -46,7 +47,6 @@ private:
     WireMessage handle_heartbeat(const WireMessage& msg);
     WireMessage handle_replicate_chunk(const WireMessage& msg);
 
-    // Pipeline-style: forward chunk data to the next replica in chain.
     bool forward_to_replica(const ChunkId& chunk_id, const std::vector<uint8_t>& data,
                             const std::vector<NodeId>& remaining_replicas);
 };

@@ -30,8 +30,8 @@ struct DownloadResult {
     double elapsed_ms;
 };
 
-// Central coordinator that manages the distributed file system.
-// Handles file splitting, chunk placement, replication, and recovery.
+// Holds the ring, metadata, replication, and the recovery thread.
+// upload/download run in this process. Storage nodes are the TCP peers.
 class Coordinator {
 public:
     explicit Coordinator(const Config& config);
@@ -40,31 +40,21 @@ public:
     void start();
     void stop();
 
-    // Register a storage node.
     bool register_storage_node(const NodeId& node_id, const std::string& address, uint16_t port);
 
-    // Upload a file: split into chunks, distribute with replication.
     UploadResult upload_file(const FilePath& path, const uint8_t* data, size_t size);
-
-    // Download a file: fetch all chunks in parallel, reassemble.
     DownloadResult download_file(const FilePath& path);
 
-    // Download using sequential fetching (for benchmark comparison).
+    // One chunk at a time, for the benchmark.
     DownloadResult download_file_sequential(const FilePath& path);
 
-    // Delete a file and all its chunks.
     bool delete_file(const FilePath& path);
 
-    // List files.
     std::vector<FileMetadata> list_files(const std::string& prefix = "");
-
-    // Get file info.
     std::optional<FileMetadata> get_file_info(const FilePath& path);
 
-    // Manual recovery trigger.
     void trigger_recovery(const NodeId& failed_node);
 
-    // Access components for testing.
     ConsistentHashRing& ring() { return *ring_; }
     MetadataStore& metadata() { return *metadata_; }
     RecoveryWorker& recovery() { return *recovery_; }
@@ -81,7 +71,6 @@ private:
     std::atomic<uint32_t> next_request_id_{0};
     std::atomic<bool> running_{false};
 
-    // Split file into fixed-size chunks.
     struct ChunkData {
         int index;
         ChunkId id;

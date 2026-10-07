@@ -4,8 +4,6 @@
 
 namespace scdfs {
 
-// ---- File operations ----
-
 bool MemoryMetadataStore::put_file(const FileMetadata& file) {
     std::unique_lock lock(file_mutex_);
     files_[file.file_path] = file;
@@ -34,8 +32,6 @@ std::vector<FileMetadata> MemoryMetadataStore::list_files(const std::string& pre
     }
     return result;
 }
-
-// ---- Chunk operations ----
 
 bool MemoryMetadataStore::put_chunk(const ChunkMetadata& chunk) {
     std::unique_lock lock(chunk_mutex_);
@@ -96,8 +92,6 @@ std::vector<ChunkMetadata> MemoryMetadataStore::get_chunks_on_node(const NodeId&
     }
     return result;
 }
-
-// ---- Node operations ----
 
 bool MemoryMetadataStore::register_node(const NodeInfo& node) {
     std::unique_lock lock(node_mutex_);

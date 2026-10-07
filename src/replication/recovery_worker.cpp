@@ -1,6 +1,5 @@
 #include "replication/recovery_worker.hpp"
 #include "common/logger.hpp"
-#include <algorithm>
 
 namespace scdfs {
 
@@ -80,14 +79,8 @@ void RecoveryWorker::recover_node(const NodeId& failed_node) {
 }
 
 void RecoveryWorker::merge_protocol(const ChunkMetadata& chunk, const NodeId& failed_node) {
-    // Core merge protocol:
-    // 1. Check metadata commit status
-    // 2. If PENDING (write was in-flight): discard partial replicas, don't re-replicate
-    // 3. If COMMITTED: re-replicate from survivors to restore replication factor
-
     if (chunk.status == ChunkStatus::PENDING) {
-        // Write was in-flight when node failed. Metadata never committed.
-        // Discard this chunk version — client will need to retry the write.
+        // Never committed. Drop the other copies; the writer retries.
         LOG_WARN("Chunk ", chunk.chunk_id, " was PENDING during failure, discarding partial replicas");
 
         for (const auto& node : chunk.replica_nodes) {
@@ -102,8 +95,6 @@ void RecoveryWorker::merge_protocol(const ChunkMetadata& chunk, const NodeId& fa
 
     if (chunk.status == ChunkStatus::DELETED) return;
 
-    // COMMITTED — need to restore replication factor
-    // Remove the failed node from replica list
     std::vector<NodeId> survivors;
     for (const auto& node : chunk.replica_nodes) {
         if (node != failed_node) survivors.push_back(node);
@@ -116,7 +107,7 @@ void RecoveryWorker::merge_protocol(const ChunkMetadata& chunk, const NodeId& fa
 
     int deficit = config_.replication_factor - static_cast<int>(survivors.size());
     if (deficit <= 0) {
-        // Already at or above replication factor (failed node wasn't actually holding a replica)
+        // Failed id was listed, but the other copies already cover the factor.
         metadata_->update_chunk_replicas(chunk.file_path, chunk.chunk_index, survivors);
         return;
     }
@@ -130,7 +121,6 @@ void RecoveryWorker::merge_protocol(const ChunkMetadata& chunk, const NodeId& fa
             break;
         }
 
-        // Pick the first survivor as source
         if (replication_->re_replicate_chunk(chunk.chunk_id, survivors[0], target)) {
             survivors.push_back(target);
             chunks_recovered_++;

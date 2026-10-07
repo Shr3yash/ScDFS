@@ -16,12 +16,7 @@ public:
     void disconnect();
     bool is_connected() const { return fd_ >= 0; }
 
-    // Send a message and receive a response (synchronous).
     bool send_receive(const WireMessage& request, WireMessage& response);
-
-    // Send raw data for streaming chunk transfers.
-    bool send_raw(const uint8_t* data, size_t len);
-    bool recv_raw(uint8_t* data, size_t len);
 
     static bool send_message(int fd, const WireMessage& msg);
     static bool recv_message(int fd, WireMessage& msg);

@@ -141,8 +141,6 @@ std::vector<std::string> CassandraMetadataStore::parse_list(const CassValue* val
 
 #endif // SCDFS_USE_CASSANDRA
 
-// ---- File operations ----
-
 bool CassandraMetadataStore::put_file(const FileMetadata& file) {
 #ifdef SCDFS_USE_CASSANDRA
     std::string query =
@@ -233,7 +231,7 @@ bool CassandraMetadataStore::delete_file(const FilePath& path) {
 
 std::vector<FileMetadata> CassandraMetadataStore::list_files(const std::string& prefix) {
 #ifdef SCDFS_USE_CASSANDRA
-    // Full table scan with optional prefix filter
+    // A prefix is not a partition lookup, so this reads the table and filters.
     std::string query = "SELECT * FROM files";
     CassStatement* stmt = cass_statement_new(query.c_str(), 0);
 
@@ -284,8 +282,6 @@ std::vector<FileMetadata> CassandraMetadataStore::list_files(const std::string& 
     return {};
 #endif
 }
-
-// ---- Chunk operations ----
 
 bool CassandraMetadataStore::put_chunk(const ChunkMetadata& chunk) {
 #ifdef SCDFS_USE_CASSANDRA
@@ -488,8 +484,7 @@ bool CassandraMetadataStore::update_chunk_replicas(const FilePath& file_path, in
 
 std::vector<ChunkMetadata> CassandraMetadataStore::get_chunks_on_node(const NodeId& node_id) {
 #ifdef SCDFS_USE_CASSANDRA
-    // Requires a full scan since Cassandra doesn't support CONTAINS queries efficiently.
-    // In production, maintain a secondary index or a separate table.
+    // No index on replica_nodes, so this reads every chunk row.
     std::string query = "SELECT * FROM chunks";
     CassStatement* stmt = cass_statement_new(query.c_str(), 0);
 
@@ -541,8 +536,6 @@ std::vector<ChunkMetadata> CassandraMetadataStore::get_chunks_on_node(const Node
     return {};
 #endif
 }
-
-// ---- Node operations ----
 
 bool CassandraMetadataStore::register_node(const NodeInfo& node) {
 #ifdef SCDFS_USE_CASSANDRA

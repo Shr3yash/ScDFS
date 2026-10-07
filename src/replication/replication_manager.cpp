@@ -23,7 +23,8 @@ std::vector<NodeId> ReplicationManager::replicate_chunk(const ChunkId& chunk_id,
         return {};
     }
 
-    // Pipeline-style: send to primary, which forwards to the rest
+    // One RPC to the primary. It is supposed to forward `downstream`.
+    // A true return means the primary stored the chunk, not that every hop did.
     std::vector<NodeId> downstream(target_nodes.begin() + 1, target_nodes.end());
 
     bool ok = send_chunk_to_node(chunk_id, data, size, target_nodes[0], downstream);
@@ -33,7 +34,7 @@ std::vector<NodeId> ReplicationManager::replicate_chunk(const ChunkId& chunk_id,
         return target_nodes;
     }
 
-    // Fallback: try direct writes to each node individually
+    // Primary RPC failed. Write each replica from here and count real ACKs.
     LOG_WARN("Pipeline replication failed, falling back to direct writes for ", chunk_id);
     std::vector<NodeId> acked;
     for (const auto& node : target_nodes) {
@@ -107,7 +108,7 @@ bool ReplicationManager::send_chunk_to_node(const ChunkId& chunk_id,
         return false;
     }
 
-    // Resolve downstream node IDs to "address:port" so storage nodes can forward
+    // Storage nodes forward with host:port strings, not node ids.
     ByteBuffer payload;
     payload.write_string(chunk_id);
     payload.write_u32(static_cast<uint32_t>(downstream.size()));
@@ -166,13 +167,12 @@ bool ReplicationManager::fetch_from_node(const ChunkId& chunk_id,
 }
 
 std::pair<std::string, uint16_t> ReplicationManager::resolve_node(const NodeId& node_id) const {
-    // First try metadata lookup
     auto info = metadata_->get_node(node_id);
     if (info) {
         return {info->address, info->port};
     }
 
-    // Fallback: parse "address:port" format from node_id
+    // Forwarded replica lists are already "host:port".
     auto colon = node_id.find(':');
     if (colon != std::string::npos) {
         return {node_id.substr(0, colon),

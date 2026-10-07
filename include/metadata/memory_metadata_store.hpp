@@ -7,7 +7,7 @@
 
 namespace scdfs {
 
-// Thread-safe in-memory metadata store for local development and testing.
+// Three maps, one shared_mutex each. Chunk key is "path:index".
 class MemoryMetadataStore : public MetadataStore {
 public:
     MemoryMetadataStore() = default;

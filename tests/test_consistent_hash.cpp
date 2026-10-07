@@ -16,7 +16,6 @@ void test_add_remove_nodes() {
     ring.remove_node("node_b");
     assert(ring.node_count() == 2);
 
-    // Re-add
     ring.add_node("node_b");
     assert(ring.node_count() == 3);
 
@@ -29,7 +28,6 @@ void test_consistent_routing() {
     ring.add_node("node_b");
     ring.add_node("node_c");
 
-    // Same key should always route to same node
     auto n1 = ring.get_node("my_chunk_001");
     auto n2 = ring.get_node("my_chunk_001");
     assert(n1 == n2);
@@ -43,7 +41,6 @@ void test_minimal_disruption() {
     ring.add_node("node_b");
     ring.add_node("node_c");
 
-    // Record mappings
     std::map<std::string, std::string> before;
     int num_keys = 10000;
     for (int i = 0; i < num_keys; i++) {
@@ -51,7 +48,6 @@ void test_minimal_disruption() {
         before[key] = ring.get_node(key);
     }
 
-    // Add a new node
     ring.add_node("node_d");
 
     int changed = 0;
@@ -82,7 +78,6 @@ void test_replica_placement() {
     auto replicas = ring.get_nodes("test_chunk", 3);
     assert(replicas.size() == 3);
 
-    // All replicas should be distinct
     assert(replicas[0] != replicas[1]);
     assert(replicas[1] != replicas[2]);
     assert(replicas[0] != replicas[2]);
@@ -128,7 +123,6 @@ void test_more_replicas_than_nodes() {
     ring.add_node("node_a");
     ring.add_node("node_b");
 
-    // Requesting 5 replicas when only 2 nodes exist
     auto replicas = ring.get_nodes("test_key", 5);
     assert(replicas.size() == 2);
 

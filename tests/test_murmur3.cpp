@@ -20,7 +20,6 @@ void test_different_inputs_differ() {
 }
 
 void test_distribution() {
-    // Hash 10000 keys and check that they spread across the 64-bit space
     std::set<uint64_t> upper_bits;
     for (int i = 0; i < 10000; i++) {
         auto h = Murmur3::hash128("key_" + std::to_string(i));
@@ -47,10 +46,7 @@ void test_hex() {
 void test_empty_string() {
     auto h1 = Murmur3::hash128("");
     auto h2 = Murmur3::hash128("");
-    assert(h1 == h2); // deterministic even for empty input
-    // Different seed should give different hash
-    auto h3 = Murmur3::hash128("", 42);
-    (void)h3;
+    assert(h1 == h2);
     std::cout << "  [PASS] Empty string hashing\n";
 }
 

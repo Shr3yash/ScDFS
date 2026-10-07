@@ -3,7 +3,6 @@
 #include <memory>
 #include <thread>
 #include <atomic>
-#include <functional>
 #include "common/types.hpp"
 #include "common/config.hpp"
 #include "hashing/consistent_hash_ring.hpp"
@@ -12,15 +11,10 @@
 
 namespace scdfs {
 
-// Background worker that:
-// 1. Monitors storage node heartbeats
-// 2. Detects node failures
-// 3. Identifies under-replicated chunks
-// 4. Runs the merge/recovery protocol to restore replication factor
-//
-// Merge protocol for write-in-flight failures:
-//   - If metadata shows PENDING (uncommitted): discard partial replicas, surface previous version
-//   - If metadata shows COMMITTED: re-replicate missing copies from survivors
+// Times out a node whose last_heartbeat is stale, then repairs its chunks.
+// PENDING is deleted. COMMITTED is copied from a survivor until the factor is met.
+// last_heartbeat is only set in register_storage_node, so this fires on its own
+// if the process outlives heartbeat_timeout_ms. Tests call recover_node instead.
 class RecoveryWorker {
 public:
     RecoveryWorker(std::shared_ptr<ConsistentHashRing> ring,
@@ -32,10 +26,9 @@ public:
     void start();
     void stop();
 
-    // Manually trigger recovery for a failed node (also called automatically by heartbeat monitor).
     void recover_node(const NodeId& failed_node);
 
-    // Check and resolve a single chunk's replication status.
+    // Same repair as recover_node, for one chunk. No caller yet.
     void resolve_chunk(const ChunkMetadata& chunk);
 
     size_t chunks_recovered() const { return chunks_recovered_.load(); }
@@ -55,10 +48,7 @@ private:
     void heartbeat_monitor_loop();
     void check_node_health();
 
-    // Merge protocol: handle chunks that were in-flight during failure
     void merge_protocol(const ChunkMetadata& chunk, const NodeId& failed_node);
-
-    // Find a new target node not already holding this chunk
     NodeId find_new_target(const ChunkMetadata& chunk) const;
 };
 

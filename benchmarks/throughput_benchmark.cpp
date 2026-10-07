@@ -108,7 +108,6 @@ BenchResult benchmark_download_parallel(ScDFSClient& client, const std::string& 
     result.total_ms = std::chrono::duration<double, std::milli>(end - start).count();
 
     double total_bytes = 0;
-    for (const auto& l : result.latencies_ms) (void)l;
     auto files = client.list(prefix);
     for (const auto& f : files) total_bytes += f.file_size;
     result.throughput_mbps = (total_bytes / (1024.0 * 1024.0)) / (result.total_ms / 1000.0);
@@ -183,8 +182,7 @@ BenchResult benchmark_concurrent_clients(std::shared_ptr<Coordinator> coord,
 int main(int argc, char** argv) {
     Logger::instance().set_level(LogLevel::WARN);
 
-    // Use smaller chunk sizes for benchmarking to see multi-chunk behavior
-    size_t chunk_size = 1 * 1024 * 1024; // 1 MB chunks for benchmarking
+    size_t chunk_size = 1 * 1024 * 1024; // small, so a 32 MB file is many chunks
     int num_nodes = 5;
     int thread_pool_size = 8;
 
@@ -202,7 +200,6 @@ int main(int argc, char** argv) {
               << "  Replication:   3x\n";
     print_separator();
 
-    // --- Set up cluster ---
     Config config;
     config.chunk_size = chunk_size;
     config.thread_pool_size = thread_pool_size;
@@ -211,7 +208,6 @@ int main(int argc, char** argv) {
 
     auto coordinator = std::make_shared<Coordinator>(config);
 
-    // Start storage nodes
     std::vector<std::unique_ptr<StorageNode>> storage_nodes;
     for (int i = 0; i < num_nodes; i++) {
         std::string node_id = "node_" + std::to_string(i);
@@ -228,10 +224,8 @@ int main(int argc, char** argv) {
     coordinator->start();
     ScDFSClient client(coordinator);
 
-    // Wait for nodes to be ready
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
-    // --- Benchmark 1: Upload throughput ---
     std::cout << "\n[1] UPLOAD THROUGHPUT\n";
     {
         size_t file_size = 32 * 1024 * 1024; // 32 MB
@@ -241,13 +235,11 @@ int main(int argc, char** argv) {
         print_result("32 MB x 5 files", result);
     }
 
-    // --- Benchmark 2: Download — Parallel vs Sequential ---
     std::cout << "\n[2] DOWNLOAD: PARALLEL vs SEQUENTIAL\n";
     {
         size_t file_size = 32 * 1024 * 1024; // 32 MB = 32 chunks at 1MB each
         auto data = generate_random_data(file_size);
 
-        // Upload test files
         for (int i = 0; i < 3; i++) {
             client.put_data("/bench/download/file_" + std::to_string(i), data.data(), data.size());
         }
@@ -263,7 +255,6 @@ int main(int argc, char** argv) {
                   << improvement << "% faster than sequential\n";
     }
 
-    // --- Benchmark 3: Concurrent client uploads ---
     std::cout << "\n[3] CONCURRENT CLIENT UPLOADS\n";
     {
         size_t file_size = 16 * 1024 * 1024; // 16 MB
@@ -275,7 +266,6 @@ int main(int argc, char** argv) {
         }
     }
 
-    // --- Benchmark 4: Varying file sizes ---
     std::cout << "\n[4] VARYING FILE SIZES\n";
     {
         for (size_t mb : {1, 8, 32, 64, 128}) {
@@ -297,7 +287,6 @@ int main(int argc, char** argv) {
         }
     }
 
-    // --- Benchmark 5: Node failure and recovery ---
     std::cout << "\n[5] FAILURE RECOVERY\n";
     {
         size_t file_size = 16 * 1024 * 1024;
@@ -306,7 +295,6 @@ int main(int argc, char** argv) {
 
         auto t0 = std::chrono::high_resolution_clock::now();
 
-        // Simulate node failure
         storage_nodes[0]->stop();
         coordinator->trigger_recovery("node_0");
 
@@ -317,7 +305,6 @@ int main(int argc, char** argv) {
                   << std::setprecision(2) << recovery_ms << " ms\n";
         std::cout << "  Chunks recovered: " << coordinator->recovery().chunks_recovered() << "\n";
 
-        // Verify data is still accessible
         auto result = client.get_data("/bench/recovery/testfile");
         std::cout << "  Data accessible after recovery: " << (result.success ? "YES" : "NO") << "\n";
         if (result.success) {
@@ -331,7 +318,6 @@ int main(int argc, char** argv) {
     std::cout << "  BENCHMARK COMPLETE\n";
     print_separator();
 
-    // Cleanup
     coordinator->stop();
     for (auto& node : storage_nodes) {
         node->stop();

@@ -12,9 +12,8 @@
 
 namespace scdfs {
 
-// Production metadata store backed by Apache Cassandra.
-// Requires the DataStax C++ driver and a running Cassandra cluster.
-// Compile with -DSCDFS_USE_CASSANDRA to enable.
+// Same rows as MemoryMetadataStore, in CQL.
+// Built without SCDFS_USE_CASSANDRA, every call returns false or empty.
 class CassandraMetadataStore : public MetadataStore {
 public:
     explicit CassandraMetadataStore(const Config& config);

@@ -52,7 +52,7 @@ WireMessage StorageNode::handle_message(const WireMessage& msg, int /*client_fd*
 }
 
 WireMessage StorageNode::handle_store_chunk(const WireMessage& msg) {
-    // Payload: [chunk_id_len:4][chunk_id][num_replicas:4][replica_ids...][chunk_data]
+    // [chunk_id string][replica count][replica host:port strings][chunk bytes]
     ByteBuffer buf(msg.payload);
 
     std::string chunk_id = buf.read_string();
@@ -67,7 +67,6 @@ WireMessage StorageNode::handle_store_chunk(const WireMessage& msg) {
 
     bool stored = chunk_store_->store_chunk(chunk_id, chunk_data);
 
-    // Pipeline replication: forward to remaining replicas
     if (stored && !remaining_replicas.empty()) {
         forward_to_replica(chunk_id, chunk_data, remaining_replicas);
     }
@@ -135,7 +134,6 @@ WireMessage StorageNode::handle_heartbeat(const WireMessage& msg) {
 }
 
 WireMessage StorageNode::handle_replicate_chunk(const WireMessage& msg) {
-    // Same format as STORE_CHUNK but used for re-replication during recovery
     return handle_store_chunk(msg);
 }
 
@@ -143,8 +141,7 @@ bool StorageNode::forward_to_replica(const ChunkId& chunk_id, const std::vector<
                                      const std::vector<NodeId>& remaining_replicas) {
     if (remaining_replicas.empty()) return true;
 
-    // Next replica is first in the list; pass the rest downstream
-    // We parse "node_id" as "address:port" for simplicity in this implementation
+    // Entries are "host:port". A bare node id will not parse.
     const NodeId& next = remaining_replicas[0];
     auto colon = next.find(':');
     if (colon == std::string::npos) {
@@ -161,7 +158,6 @@ bool StorageNode::forward_to_replica(const ChunkId& chunk_id, const std::vector<
         return false;
     }
 
-    // Build payload for downstream: chunk_id + remaining replicas (minus current) + data
     ByteBuffer payload;
     payload.write_string(chunk_id);
 

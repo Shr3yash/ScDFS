@@ -7,19 +7,17 @@
 
 namespace scdfs {
 
-// Abstract interface for metadata storage.
-// Implementations: InMemoryMetadataStore (testing), CassandraMetadataStore (production).
+// File, chunk, and node rows.
+// MemoryMetadataStore is the default. CassandraMetadataStore needs the driver.
 class MetadataStore {
 public:
     virtual ~MetadataStore() = default;
 
-    // File operations
     virtual bool put_file(const FileMetadata& file) = 0;
     virtual std::optional<FileMetadata> get_file(const FilePath& path) = 0;
     virtual bool delete_file(const FilePath& path) = 0;
     virtual std::vector<FileMetadata> list_files(const std::string& prefix = "") = 0;
 
-    // Chunk operations
     virtual bool put_chunk(const ChunkMetadata& chunk) = 0;
     virtual std::optional<ChunkMetadata> get_chunk(const FilePath& file_path, int chunk_index) = 0;
     virtual std::vector<ChunkMetadata> get_chunks_for_file(const FilePath& file_path) = 0;
@@ -27,10 +25,8 @@ public:
     virtual bool update_chunk_replicas(const FilePath& file_path, int chunk_index,
                                        const std::vector<NodeId>& replicas) = 0;
 
-    // Retrieve all chunks stored on a given node (for recovery).
     virtual std::vector<ChunkMetadata> get_chunks_on_node(const NodeId& node_id) = 0;
 
-    // Node registry
     virtual bool register_node(const NodeInfo& node) = 0;
     virtual bool update_node_status(const NodeId& node_id, NodeStatus status) = 0;
     virtual bool update_heartbeat(const NodeId& node_id) = 0;

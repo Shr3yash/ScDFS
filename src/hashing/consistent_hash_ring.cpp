@@ -109,8 +109,4 @@ bool ConsistentHashRing::has_node(const NodeId& node_id) const {
     return node_positions_.count(node_id) > 0;
 }
 
-uint64_t ConsistentHashRing::hash_key(const std::string& key) const {
-    return compute_hash(key);
-}
-
 } // namespace scdfs

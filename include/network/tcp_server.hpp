@@ -11,7 +11,6 @@
 
 namespace scdfs {
 
-// Callback invoked for each received message; returns a response message.
 using MessageHandler = std::function<WireMessage(const WireMessage&, int client_fd)>;
 
 class TcpServer {
